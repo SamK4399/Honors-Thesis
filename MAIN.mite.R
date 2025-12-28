@@ -18,16 +18,8 @@ mite.data <- read.csv("all.mite.elevvv.csv")
 
 #### REPRODUCTIVE VARIABLES ####
   
-  
-  
-  
-                  ###### nestling body condition ######
-  
-  
-  
 
-
-###### Nestling body condition third times a charm ######
+###### NESTLING BODY CONDITION ######
 
 #import data 
 m.nest.data <- read.csv("master.nestling.csv")
@@ -92,11 +84,12 @@ wing.BC.lm <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|area) + (1|Nest.ye
 wing.BC.lm2 <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|Nest.year),nest.BC)
 
 AIC(wing.BC.lm,wing.BC.lm2)
+summary(wing.BC.lm)
 
-######Body condition with TARSUS ######
+#####Body condition with TARSUS #####
 
 
-#######data setup ########
+                          ####### data setup #####
 #remove rows that do not have nestling weight data and save to new DF
 nestling.cond.data = m.nest.data
 
@@ -131,7 +124,9 @@ nestling.cond.data.tarsus$cond_resid[as.integer(rownames(dat_cond_tarsus))] <- r
 
 
 
-######## actual analysis ########
+
+
+                          ##### actual analysis ####
 
 #graph
 nest.BC %>%
@@ -152,34 +147,11 @@ summary(tarsus.BC.lm)
 
 
 
-
-
-
-
-######  here after learning ######
-#H0: There is no difference in the average clutch size for all groups (# of infected parents)
-
-#run shapiro wilk to test normality
-aggregate(Egg_Number ~ Num.mite.per.nest,  # modify this argument
-          data = mite.data,      # modify this argument
-          FUN = function(x) shapiro.test(x)$p.value) 
-mite.data %>%
-  filter(Num.mite.per.nest == "0") %>%
-  ggplot()+
-  geom_bar(aes( x = Egg_Number))
-
-
-
-
-
-
-
-
-###### Nestling Number ######
+###### NESTLING NUMBER ######
 #see biostsats project
 
 
-###### Egg Number #######
+###### EGG NUMBER #######
 
 nest.data <- read.csv("Nest.Data.csv")
 
@@ -243,15 +215,53 @@ egg.num.lm.M <- glmmTMB(Egg_Number ~  M.mite.status + (1|M.banding.year) + (1|ar
 
 summary(egg.num.lm.M)
 
-              #### RANDOM AREA STUFF ####
+
+##### ADULT BODY CONDITION #####
+indiv.data <- read.csv("individual.data.csv")
 
 
 
 
+indiv.data <- indiv.data %>%
+  mutate(
+    wing   = suppressWarnings(as.numeric(Wing.Chord)),
+    mass_g = suppressWarnings(as.numeric(Bird.Weight))
+  )
 
+# Keep only rows with both values
+dat_cond_adult_wing <- indiv.data %>%
+  filter(!is.na(mass_g), !is.na(wing), mass_g > 0, wing > 0)
 
+if (nrow(dat_cond_adult_wing) < 10) {
+  warning("Few rows with both mass and wing available (n = ", nrow(dat_cond_adult_wing), ").")
+}
 
-##### INFECTIONS PER AREA #####
+# Fit regression of body mass on wing
+cond_adult_lm_wing <- lm(log(mass_g) ~ log(wing), data = dat_cond_adult_wing)
+
+# Add residuals back into the main dataframe
+indiv.data$body.cond.wing <- NA_real_
+indiv.data$body.cond.wing[as.integer(rownames(dat_cond_adult_wing))] <- resid(cond_adult_lm_wing)
+
+write.csv(indiv.data ,"individual.data.csv", row.names = FALSE)
+
+                    ## Analysis ##
+#analyze only MOCH
+adult.BC.data <- indiv.data %>%
+  filter(Species == "MOCH", !Sex == "U", !Sex == "")
+
+table(adult.BC.data$Sex)
+
+#possible predictors
+    # area
+    # sex
+    # month/year
+##I CHECKED MODELS WITH ALL OF THESE AND NONE OF THEM CHANGED THE AIC 
+adult.BC.lm <- glmmTMB(body.cond.wing ~ Mite_status, adult.BC.data)
+
+summary(adult.BC.lm)
+
+#### INFECTIONS PER AREA ####
 
 
 
