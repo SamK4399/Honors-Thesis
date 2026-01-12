@@ -1,9 +1,13 @@
 
 
 #all needed packages
+  #general
 library(dplyr)
 library(ggplot2)
 library(tidyr)
+library(glmmTMB)
+
+  #for maps
 library(geodata)
 library(raster)
 library(sf)
@@ -22,7 +26,7 @@ mite.data <- read.csv("all.mite.elevvv.csv")
 ###### NESTLING BODY CONDITION ######
 
 #import data 
-m.nest.data <- read.csv("master.nestling.csv")
+m.nest.data <- read.csv("ALL.NESTLING.csv")
 
 
 #write csv
@@ -63,7 +67,7 @@ nestling.cond.wing.data$cond_resid[as.integer(rownames(dat_cond_wing))] <- resid
 
 #write.csv(nestling.cond.wing.data ,"nest.BC.wing.csv", row.names = FALSE)
 ######## actual analysis ########
-nest.BC <- read.csv("Nest.Data.csv")
+nest.BC <- read.csv("ALL.NEST.csv")
 str(nest.BC)
 
 
@@ -85,6 +89,9 @@ wing.BC.lm2 <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|Nest.year),nest.B
 
 AIC(wing.BC.lm,wing.BC.lm2)
 summary(wing.BC.lm)
+
+
+##NO SIGNIFICANCE
 
 #####Body condition with TARSUS #####
 
@@ -142,7 +149,7 @@ tarsus.BC.lm <- glmmTMB(avg.nestling.BC.tarsus~nest.status + (1|area) + (1|Nest.
 
 summary(tarsus.BC.lm)
 
-
+#NO SIGNIFICANCE
 
 
 
@@ -153,7 +160,7 @@ summary(tarsus.BC.lm)
 
 ###### EGG NUMBER #######
 
-nest.data <- read.csv("Nest.Data.csv")
+nest.data <- read.csv("ALL.NEST.csv")
 
 #add column for nest status
 nest.data$nest.status <- as.factor(ifelse(nest.data$Num.mite.per.nest > 0, 1, 0))
@@ -187,21 +194,21 @@ summary(egg.num.lm.1)
 
 ###interpretation 
 
-# log(egg number) = 1.91057 -0.11084(infected)
+# log(egg number) = 1.91070 -0.09517(infected)
 
-logENinf <- 1.91057 - 0.11084*(1)
+logENinf <- 1.91070 - 0.09517*(1)
 ENinf <- exp(logENinf)
 
-logENuninf <- 1.91057 -0.11084*(0)
+logENuninf <- 1.91070 -0.09517*(0)
 ENuninf <- exp(logENuninf)
 
 #get prob difference between M and F MOCH
-ENinf/ENuninf # = 0.895082
+ENinf/ENuninf # = 0.9092184
 
-(1 - 0.895082)*100
-# 10.4918
+(1 - 0.9092184)*100
+# 9.07816
 
-#nests where one or both parents are infected with mites lay ~10.49 % less eggs than uninfected nests
+#nests where one or both parents are infected with mites lay ~9.08 % less eggs than uninfected nests
 
 
 #### do egg analysis again for female infected 
@@ -210,11 +217,12 @@ egg.num.lm.F <- glmmTMB(Egg_Number ~  F.mite.status + (1|M.banding.year) + (1|ar
 
 summary(egg.num.lm.F)
 
-
+#for male infected
 egg.num.lm.M <- glmmTMB(Egg_Number ~  M.mite.status + (1|M.banding.year) + (1|area), data = egg.num.data, family = compois)
 
 summary(egg.num.lm.M)
 
+##no effect when female is infected but effect when male is infected?
 
 ##### ADULT BODY CONDITION #####
 indiv.data <- read.csv("individual.data.csv")
@@ -264,7 +272,7 @@ summary(adult.BC.lm)
 #### INFECTIONS PER AREA ####
 
 
-
+jhg
 #remove NA area cases
 mite.data.handcap = mite.data[(!is.na(mite.data$area)), ]
 
@@ -789,7 +797,7 @@ Nest.Data <- Nest.Data %>%
   select(Nestbox,  Nest.year, M.band.number,  F.band.number,  M.mite.status,  F.mite.status, Num.mite.per.nest,  Egg_Number,  Nestling_Number,  Avg_Nestling_Weight, Egg_Nestling_Diff,  Avg.Nestling.Wing,  Avg.Nestling.Tarsus,  age.at.measure.day,  Nestling.data.notes,  M.banding.year,   M.banding.month,   M.banding.day, F.banding.year, F.banding.month,  F.banding.day, M.age, F.age, M.color.combo, F.color.combo,M.species, F.species, Location, area,Nestbox.num, long, lat,elevation.m, )
 
 #save to computer
-write.csv(Nest.Data, "Nest.Data.csv", row.names = FALSE)
+#write.csv(Nest.Data, "ALL.NEST.csv", row.names = FALSE)
 
 #yay!!!!!!
 
@@ -878,3 +886,15 @@ elev <- get_elev_point(coords_sf, prj = st_crs(coords_sf)$proj4string, src = "aw
 mite.data$Elevation.m[as.numeric(rownames(data.with.coord))] <- elev$elevation
 
 
+#### adult fem bc vs clutch size
+library(glmmTMB)
+library(dplyr)
+str(adult.BC.data)
+adult.BC.data <-adult.BC.data %>% 
+  mutate(
+  Egg_Number   = suppressWarnings(as.numeric(Egg_Number)))
+str(adult.BC.data)
+
+BCxCSlm<- glmmTMB(body.cond.wing~Egg_Number + (1|Banding.Year) +(1|area),data = adult.BC.data)
+
+summary(BCxCSlm)
