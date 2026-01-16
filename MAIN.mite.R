@@ -14,7 +14,8 @@ library(sf)
 library(elevatr)
 
 #import data
-mite.data <- read.csv("all.mite.elevvv.csv")
+indiv.data <- read.csv("ALL.INDIV.csv")
+nest.data <- read.csv("ALL.NEST.csv")
 
 #to save data set as its in R
 #write.csv(nestling.cond.data, "nest.BC.data.csv", row.names = FALSE)
@@ -84,8 +85,8 @@ Body Condition (wing chord)")+
 
 #
 
-wing.BC.lm <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|area) + (1|Nest.year),nest.BC)
-wing.BC.lm2 <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|Nest.year),nest.BC)
+wing.BC.lm <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|area) + (1|Nest.year)+(1|Nestling_Number),nest.BC)
+wing.BC.lm2 <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|Nest.year)+(1|Nestling_Number),nest.BC)
 
 AIC(wing.BC.lm,wing.BC.lm2)
 summary(wing.BC.lm)
@@ -145,7 +146,7 @@ Body Condition")+
 
 #
 
-tarsus.BC.lm <- glmmTMB(avg.nestling.BC.tarsus~nest.status + (1|area) + (1|Nest.year),nest.BC)
+tarsus.BC.lm <- glmmTMB(avg.nestling.BC.tarsus~nest.status + (1|area) + (1|Nest.year)+(1|Nestling_Number),nest.BC)
 
 summary(tarsus.BC.lm)
 
@@ -165,8 +166,18 @@ nest.data <- read.csv("ALL.NEST.csv")
 #add column for nest status
 nest.data$nest.status <- as.factor(ifelse(nest.data$Num.mite.per.nest > 0, 1, 0))
 
+# check all variables for NAs
+table(nest.data$Egg_Number, useNA = "ifany")
+table(nest.data$nest.status, useNA = "ifany")
+table(nest.data$M.banding.year, useNA = "ifany")
+table(nest.data$area, useNA = "ifany")
+table(nest.data$elevation.m, useNA = "ifany")
+table(nest.data$julian.CI.date, useNA = "ifany")
+
+
+#remove NAs etc
 egg.num.data <- nest.data %>%
-  filter(!Egg_Number == "0", !Egg_Number == "", M.species == "MOCH")
+  filter(!Egg_Number == "0", !Egg_Number == "", !Egg_Number == "NA",!area == "NA",M.species == "MOCH")
 
 table(nest.data$M.banding.year)
 nest.data %>%
@@ -177,20 +188,27 @@ nest.data %>%
 mean(egg.num.data$Egg_Number) #6.612903
 var(egg.num.data$Egg_Number) #1.940092
 
-
+#banding year and area
 egg.num.lm.1 <- glmmTMB(Egg_Number ~  nest.status + (1|M.banding.year) + (1|area), data = egg.num.data, family = compois)
 
+#banding year
 egg.num.lm.2 <- glmmTMB(Egg_Number ~  nest.status + (1|M.banding.year), data = egg.num.data, family = compois)
 
+#banding year and elevation
 egg.num.lm.3 <- glmmTMB(Egg_Number ~  nest.status + (1|M.banding.year) + elevation.m, data = egg.num.data, family = compois)
 
+#banding year, area, and julian date
+egg.num.lm.julian <- glmmTMB(Egg_Number ~  nest.status + (1|M.banding.year) + (1|area) + julian.CI.date, data = egg.num.data, family = compois)
+
+
+#NULL
 egg.num.lm.NULL <- glmmTMB(Egg_Number ~  1, data = egg.num.data, family = compois)
  
 
 AIC(egg.num.lm.1,egg.num.lm.2,egg.num.lm.3,egg.num.lm.NULL)
 
 #this is the best model ##significant too
-summary(egg.num.lm.1)
+summary(egg.num.lm.2)
 
 ###interpretation 
 
@@ -898,3 +916,23 @@ str(adult.BC.data)
 BCxCSlm<- glmmTMB(body.cond.wing~Egg_Number + (1|Banding.Year) +(1|area),data = adult.BC.data)
 
 summary(BCxCSlm)
+
+
+##### infection and date banded?
+library(glmmTMB)
+library(dplyr)
+#add day of year (1-365)
+indiv.data$day_of_year <- yday(make_date(indiv.data$Banding.Year, indiv.data$Banding.Month, indiv.data$Banding.Day))
+
+random.MOCH <- indiv.data %>%
+  filter(Species == "MOCH")
+summary(glmmTMB(Mite_status~day_of_year,data = random.MOCH))
+
+
+#julian date and clutch size model
+
+julian.EN.mod <- glmmTMB(Egg_Number ~ julian.CI.date, data = egg.num.data)
+summary(julian.EN.mod)
+
+julian.NN.mod <- glmmTMB(Nestling_Number ~ julian.CI.date ,data = mod.1.data)
+summary(julian.NN.mod)
