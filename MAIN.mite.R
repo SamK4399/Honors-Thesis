@@ -31,7 +31,7 @@ m.nest.data <- read.csv("ALL.NESTLING.csv")
 
 
 #write csv
-#write.csv(nest.BC ,"nest.BC.csv", row.names = FALSE)
+write.csv(nestling.BC ,"ALL.NESTLING.csv", row.names = FALSE)
 
 ######Body condition with WING CHORD ######
 
@@ -63,33 +63,50 @@ if (nrow(dat_cond_wing) < 10) {
 cond_lm_wing <- lm(log(mass_g) ~ log(wing), data = dat_cond_wing)
 
 # Add residuals back into the main dataframe
-nestling.cond.wing.data$cond_resid <- NA_real_
-nestling.cond.wing.data$cond_resid[as.integer(rownames(dat_cond_wing))] <- resid(cond_lm_wing)
+nestling.cond.wing.data$wing.cond_resid <- NA_real_
+nestling.cond.wing.data$wing.cond_resid[as.integer(rownames(dat_cond_wing))] <- resid(cond_lm_wing)
 
 #write.csv(nestling.cond.wing.data ,"nest.BC.wing.csv", row.names = FALSE)
 ######## actual analysis ########
-nest.BC <- read.csv("ALL.NEST.csv")
-str(nest.BC)
+nestling.BC <- nestling.cond.wing.data
+str(nestling.BC)
 
 
 #add column for nest status
-nest.BC$nest.status <- as.factor(ifelse(nest.BC$Num.mite.per.nest > 0, 1, 0))
+#nestling.BC$nest.status <- as.factor(ifelse(nestling.BC$Num.mite.per.nest > 0, 1, 0))
 
+###not sure how to graph this anymore
 #graph
-nest.BC %>%
-  ggplot(aes(x = nest.status, y = avg.nestling.BC.wing))+
-  geom_boxplot()+
-  labs(x = "Nest Infection Status", y = "Average Nestling Body Condition", title= "Nest infection status vs Nestling 
-Body Condition (wing chord)")+
-  scale_x_discrete(labels= c("Uninfected","Infected"))
+#nestling.BC %>%
+#  ggplot(aes(x = nest.mite.status, y = wing.cond_resid))+
+#  geom_boxplot()+
+#  labs(x = "Nest Infection Status", y = "Average Nestling Body Condition", title= "Nest infection status vs Nestling 
+#Body Condition (wing chord)")+
+#  scale_x_discrete(labels= c("Uninfected","Infected"))
 
 #
+nestling.wing.bc.sub.data <- nestling.BC %>%
+  filter(!nestling.number == "NA", !nestling.number =="0")
+  
+  
+nestling.wing.BC.lm <- glmmTMB(wing.cond_resid ~ nest.mite.status + (1|area)+ (1|nestling.number),nestling.BC)
 
-wing.BC.lm <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|area) + (1|Nest.year)+(1|Nestling_Number),nest.BC)
-wing.BC.lm2 <- glmmTMB(avg.nestling.BC.wing ~ nest.status + (1|Nest.year)+(1|Nestling_Number),nest.BC)
+#much lower AIC
+wing.BC.lm2 <- glmmTMB(wing.cond_resid ~ nest.mite.status +(1|nestling.number),nestling.BC)
 
-AIC(wing.BC.lm,wing.BC.lm2)
-summary(wing.BC.lm)
+
+#REDO
+nest.data.nestl.BC.data<- read.csv("ALL.NEST.csv") %>%
+  filter(!M.species=="MOCH", !M.species=="BCCH")
+table(nest.data$area, useNA = "ifany")
+
+nest.BClm.data <- nest.data
+wing.nestl.BC.lm1 <- glmmTMB(avg.nest.wing.BC~nest.status+Nestling_Number,nest.data)
+wing.nestl.BC.lm2 <- glmmTMB(avg.nest.wing.BC~nest.status+Nestling_Number+area,nest.data)
+
+
+AIC(wing.nestl.BC.lm1,wing.nestl.BC.lm2)
+summary(wing.nestl.BC.lm1)
 
 
 ##NO SIGNIFICANCE
@@ -137,7 +154,7 @@ nestling.cond.data.tarsus$cond_resid[as.integer(rownames(dat_cond_tarsus))] <- r
                           ##### actual analysis ####
 
 #graph
-nest.BC %>%
+nestling.BC %>%
   ggplot(aes(x = nest.status, y = avg.nestling.BC.tarsus))+
   geom_boxplot()+
   labs(x = "Nest Infection Status", y = "Average Nestling Body Condition", title= "Nest infection status vs Nestling 
@@ -146,11 +163,46 @@ Body Condition")+
 
 #
 
-tarsus.BC.lm <- glmmTMB(avg.nestling.BC.tarsus~nest.status + (1|area) + (1|Nest.year)+(1|Nestling_Number),nest.BC)
+tarsus.BC.lm <- glmmTMB(avg.nestling.BC.tarsus~nest.status + (1|area) + (1|Nest.year)+(1|Nestling_Number),nestling.BC)
 
 summary(tarsus.BC.lm)
 
 #NO SIGNIFICANCE
+
+
+#####NESLTING BODY CONDITION REDO#########
+
+nestling.data <- read.csv("ALL.NESTLING.csv")
+
+#filter data and such
+
+nestl.BC.analysis.data <- nestling.data %>%
+  filter(Species == "MOCH") %>%
+  mutate(across(c(Tarsus.Length, Bird.Weight), as.numeric)) 
+
+#calculate scaling component
+library(smatr)
+
+sma_fit_N <- sma(log(Bird.Weight) ~ log(Tarsus.Length), data = nestl.BC.analysis.data)
+#run coef(sma_fit_N) and make slope the bSMA
+b_SMA_N <- 1.1300709  
+
+#calculate reference length (mean of population tarsus)
+L0_N <- mean(nestl.BC.analysis.data$Tarsus.Length, na.rm = TRUE)
+
+#calculate SMI
+
+nestl.BC.analysis.data$SMI_tarsus <-
+  nestl.BC.analysis.data$Bird.Weight *
+  (L0 / nestl.BC.analysis.data$Tarsus.Length)^b_SMA
+
+
+nestl.BC.lm.1 <- glmmTMB(SMI_tarsus ~ nest.mite.status ,data =nestl.BC.analysis.data )
+
+summary(nestl.BC.lm.1)
+
+
+
 
 
 
@@ -176,8 +228,13 @@ table(nest.data$julian.CI.date, useNA = "ifany")
 
 
 #remove NAs etc
+
+#for removal of julian date nas
+##egg.num.data <- nest.data %>%
+#  filter(!Egg_Number == "0", !Egg_Number == "", !Egg_Number == "NA",!area == "NA",M.species == "MOCH",!julian.CI.date == "NA")
+
 egg.num.data <- nest.data %>%
-  filter(!Egg_Number == "0", !Egg_Number == "", !Egg_Number == "NA",!area == "NA",M.species == "MOCH")
+    filter(!Egg_Number == "0", !Egg_Number == "", !Egg_Number == "NA",!area == "NA",M.species == "MOCH")
 
 table(nest.data$M.banding.year)
 nest.data %>%
@@ -243,7 +300,7 @@ summary(egg.num.lm.M)
 ##no effect when female is infected but effect when male is infected?
 
 ##### ADULT BODY CONDITION #####
-indiv.data <- read.csv("individual.data.csv")
+indiv.data <- read.csv("ALL.INDIV.csv")
 
 
 
@@ -271,6 +328,66 @@ indiv.data$body.cond.wing[as.integer(rownames(dat_cond_adult_wing))] <- resid(co
 
 write.csv(indiv.data ,"individual.data.csv", row.names = FALSE)
 
+
+#####ADULT BODY CONDITION REDO##########
+
+#filter data and such
+
+ad.BC.analysis.data <- indiv.data %>%
+  filter(Species == "MOCH", Sex == "F" |Sex == "M") %>%
+  mutate(across(c(Tarsus.Length, Bird.Weight), as.numeric)) %>%
+  mutate(across(c(Nestling_Number), as.factor))
+
+#calculate scaling component
+library(smatr)
+
+sma_fit <- sma(log(Bird.Weight) ~ log(Tarsus.Length), data = ad.BC.analysis.data)
+#run coef(sma_fit) and make slope the bSMA
+b_SMA <- -0.744241  
+
+#calculate reference length (mean of population tarsus)
+L0 <- mean(ad.BC.analysis.data$Tarsus.Length, na.rm = TRUE)
+
+#calculate SMI
+
+ad.BC.analysis.data$SMI_tarsus <-
+  ad.BC.analysis.data$Bird.Weight *
+  (L0 / ad.BC.analysis.data$Tarsus.Length)^b_SMA
+
+#just effect
+adult.BC.lm <- glmmTMB(SMI_tarsus ~ Mite_status, ad.BC.analysis.data)
+
+#julian date
+adult.BC.lm2 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day, ad.BC.analysis.data)
+
+#julian date and bander ID
+adult.BC.lm3 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|Bander.ID), ad.BC.analysis.data)
+
+#julian date, bander ID, and area
+adult.BC.lm4 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID), ad.BC.analysis.data)
+
+#julian date, bander ID, area, and year
+adult.BC.lm5 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year), ad.BC.analysis.data)
+
+#julian date, bander ID, area, and year
+adult.BC.lm5 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year) + (1|Sex), ad.BC.analysis.data)
+
+###THIS ONE
+adult.BC.lm6 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year) + Sex , ad.BC.analysis.data)
+
+
+adult.BC.lm7 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year) + Sex + (1|Nestling_Number), ad.BC.analysis.data)
+
+
+summary(adult.BC.lm7)
+AIC(adult.BC.lm7,adult.BC.lm6)
+
+plot(ad.BC.analysis.data$SMI_tarsus)
+
+#sex has a huge effect on body condtion
+summary(glmmTMB(SMI_tarsus ~ Sex, ad.BC.analysis.data))
+
+
                     ## Analysis ##
 #analyze only MOCH
 adult.BC.data <- indiv.data %>%
@@ -284,8 +401,10 @@ table(adult.BC.data$Sex)
     # month/year
 ##I CHECKED MODELS WITH ALL OF THESE AND NONE OF THEM CHANGED THE AIC 
 adult.BC.lm <- glmmTMB(body.cond.wing ~ Mite_status, adult.BC.data)
+adult.BC.lm2 <- glmmTMB(body.cond.wing ~ Mite_status +julian.band.day, adult.BC.data)
 
-summary(adult.BC.lm)
+AIC(adult.BC.lm,adult.BC.lm2)
+summary(adult.BC.lm2)
 
 #### INFECTIONS PER AREA ####
 
@@ -565,14 +684,49 @@ points(only.mite.SGR$long,
 
 
 
+########## analysis of infection and area ###########
+area.nest.data <- nest.data%>%
+  mutate(across(c(nest.status, area), as.factor)) %>%
+  filter(!M.species == "BCCH", !julian.CI.date == "NA")
+
+#### infected nests
+  # i tested analysis with julian date as covariate and there was no difference in models
+nest.area.lm1 <- glmmTMB(nest.status ~ area, data = area.nest.data)
+
+nest.area.lm2 <- glmmTMB(nest.status ~ area + julian.CI.date, data = area.nest.data)
+
+nest.area.lm3 <- glmmTMB(nest.status ~ area + M.banding.year, data = area.nest.data)
+
+AIC(nest.area.lm1,nest.area.lm2,nest.area.lm3) #all are the same
+
+#do simple t-test
+t.test
 
 
+#plot for area and individual infection
+area.plot.data <- indiv.data %>%
+  filter(!area == "CU", !area == "NA", !area=="")%>%
+  mutate(across(Mite_status, as.factor))
 
+#change order to plot is cleaner
+area.plot.data$area <- factor(
+  area.plot.data$area,
+  levels = c("BLD", "FLG", "SGR", "NED", "MRS")
+)
 
+ggplot(data = area.plot.data) +
+  geom_mosaic(aes(x = product(Mite_status, area), fill = Mite_status, weight = 1)) +
+  labs(x = "Area", y = " ", title = "Infection proportion per area", fill = "Infection Status" )+
+  scale_fill_manual(
+    values = c("1" = "lightblue", "0" = "salmon"),
+    labels = c("0" = "Uninfected", "1" = "Infected")  # Legend labels
+  )+ theme(
+    panel.grid = element_blank(),# remove background pattern
+    axis.text.y = element_blank(), #remove y axis labels
+    axis.ticks.y = element_blank()) #remove y axis ticks
+ 
 
-
-
-
+library(ggmosaic)
                           #### MAPS ####
 
 
@@ -587,7 +741,8 @@ library(prettymapr)
 
 
 #reading in with code might import weird (names of columsn shifted down?). importing manually fixes it
-all_mite_elevvv <- mite.data
+all_mite_elevvv <- indiv.data %>%
+  filter(!long == "NA", !long == "", !lat == "NA", !lat == "")
 #Create a shapefile of the boxes using the latitude and Longitude from the boxes
 boxes_sf <- st_as_sf(all_mite_elevvv, coords = c("long", "lat"), crs = 4326)
 
@@ -889,10 +1044,10 @@ library(elevatr)
 
 #add elevation to data
 # Copy data
-mite.data$Elevation.m <- NA  
+indiv.data$Elevation.m <- NA  
 
 # Drop missing coords for sf conversion
-data.with.coord <- subset(mite.data, !is.na(lat) & !is.na(long))
+data.with.coord <- subset(indiv.data, !is.na(lat) & !is.na(long))
 
 # Convert only clean rows
 coords_sf <- st_as_sf(data.with.coord, coords = c("long", "lat"), crs = 4326)
@@ -901,7 +1056,7 @@ coords_sf <- st_as_sf(data.with.coord, coords = c("long", "lat"), crs = 4326)
 elev <- get_elev_point(coords_sf, prj = st_crs(coords_sf)$proj4string, src = "aws")
 
 # Put values back into original df (matching by rownames)
-mite.data$Elevation.m[as.numeric(rownames(data.with.coord))] <- elev$elevation
+indiv.data$Elevation.m[as.numeric(rownames(data.with.coord))] <- elev$elevation
 
 
 #### adult fem bc vs clutch size
@@ -936,3 +1091,32 @@ summary(julian.EN.mod)
 
 julian.NN.mod <- glmmTMB(Nestling_Number ~ julian.CI.date ,data = mod.1.data)
 summary(julian.NN.mod)
+
+
+## elevation and infection
+#not directional so.?
+elev.lm <- glmmTMB(Mite_status~Elevation.m,data = indiv.data)
+summary(elev.lm)
+
+plot( indiv.data$Mite_status,indiv.data$Elevation.m)
+
+table(indiv.data$Mite_status, indiv.data$Sex)
+
+
+## infection and area -- chi square
+
+infection.data <- table(indiv.data$Mite_status)
+
+area.data <- table(indiv.data$area)
+
+infection.distr <- infection.data/sum(infection.data)
+
+area.table <- table(indiv.data$Mite_status,indiv.data$area)
+
+addmargins(area.table)
+ 
+area.chi.square <- chisq.test(x=indiv.data$area, y = indiv.data$Mite_status)
+area.chi.square
+
+chisq.posthoc.test(area.table,
+                   method = "bonferroni")
