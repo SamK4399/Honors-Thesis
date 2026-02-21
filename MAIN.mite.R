@@ -6,6 +6,8 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(glmmTMB)
+library(DHARMa)
+library(performance)
 
   #for maps
 library(geodata)
@@ -21,202 +23,142 @@ nest.data <- read.csv("ALL.NEST.csv")
 #write.csv(nestling.cond.data, "nest.BC.data.csv", row.names = FALSE)
 
 
-#### REPRODUCTIVE VARIABLES ####
-  
-
-###### NESTLING BODY CONDITION ######
-
-#import data 
-m.nest.data <- read.csv("ALL.NESTLING.csv")
+                        #### REPRODUCTIVE VARIABLES ####
 
 
-#write csv
-write.csv(nestling.BC ,"ALL.NESTLING.csv", row.names = FALSE)
+                          ###### Nestling Number ######
 
-######Body condition with WING CHORD ######
+#first check all variables for NAs
+table(nest.data$Nestling_Number, useNA = "ifany")
+table(nest.data$nest.status, useNA = "ifany")
+table(nest.data$M.banding.year, useNA = "ifany")
+table(nest.data$area, useNA = "ifany")       #Has NAs
 
+#create data set 
+mod.1.data <- nest.data %>%
+  filter(M.species == "MOCH" | F.species == "MOCH",  #keep only MOCH
+         !Nestling_Number=="0", #remove failed nests
+         !area == "NA") #remove NAs
+str(mod.1.data)
 
-#######data setup ########
-#remove rows that do not have nestling weight data and save to new DF
-nestling.cond.data = m.nest.data
+          ##DATA EXPLORATION
+#check for outliers
+boxplot(mod.1.data$Nestling_Number,  ylab = "Nestling Number")
 
+#check for normality
+hist(mod.1.data$Nestling_Number, xlim = c(0,10))
+#looks kinda normal but check with shapiro test
+shapiro.test((mod.1.data$Nestling_Number))
+#says its not normal. count data as well so I will be using some sort of poisson glmm
 
+#check variance = mean? (poisson assumption i think)
+mean(mod.1.data$Nestling_Number) #5.263158
+var(mod.1.data$Nestling_Number) #3.04386
 
-##sara stuff translated from adult body condition to nestling#
-##im not sure if this is a valid way to do this because its translated from wing to tarsus for residual##
+#mean > variance so I will use compois family
 
-nestling.cond.wing.data <- nestling.cond.data %>%
-  mutate(
-    wing   = suppressWarnings(as.numeric(Wing.Chord)),
-    mass_g = suppressWarnings(as.numeric(Bird.Weight))
-  )
+          ##MODELS
+#banding year random effect
+mod1.year <- glmmTMB(Nestling_Number ~  nest.status + (1|M.banding.year), 
+                     data = mod.1.data, family = compois)
 
-# Keep only rows with both values
-dat_cond_wing <- nestling.cond.wing.data %>%
-  filter(!is.na(mass_g), !is.na(wing), mass_g > 0, wing > 0)
+#area random effect
+mod1.area <- glmmTMB(Nestling_Number ~  nest.status +  (1|area), data = mod.1.data,
+                     family = compois)
 
-if (nrow(dat_cond_wing) < 10) {
-  warning("Few rows with both mass and wing available (n = ", nrow(dat_cond_wing), ").")
-}
+#both random effects
+mod1.both <- glmmTMB(Nestling_Number ~  nest.status +  (1|area) + 
+                       (1|M.banding.year), data = mod.1.data, family = compois)
 
-# Fit regression of body mass on wing
-cond_lm_wing <- lm(log(mass_g) ~ log(wing), data = dat_cond_wing)
+#neither random effects
+mod1.noRE <- glmmTMB(Nestling_Number ~  nest.status, data = mod.1.data, 
+                     family = compois) 
 
-# Add residuals back into the main dataframe
-nestling.cond.wing.data$wing.cond_resid <- NA_real_
-nestling.cond.wing.data$wing.cond_resid[as.integer(rownames(dat_cond_wing))] <- resid(cond_lm_wing)
+#null model
+mod1.null <- glmmTMB(Nestling_Number ~ 1, data = mod.1.data, family = compois) 
 
-#write.csv(nestling.cond.wing.data ,"nest.BC.wing.csv", row.names = FALSE)
-######## actual analysis ########
-nestling.BC <- nestling.cond.wing.data
-str(nestling.BC)
-
-
-#add column for nest status
-#nestling.BC$nest.status <- as.factor(ifelse(nestling.BC$Num.mite.per.nest > 0, 1, 0))
-
-###not sure how to graph this anymore
-#graph
-#nestling.BC %>%
-#  ggplot(aes(x = nest.mite.status, y = wing.cond_resid))+
-#  geom_boxplot()+
-#  labs(x = "Nest Infection Status", y = "Average Nestling Body Condition", title= "Nest infection status vs Nestling 
-#Body Condition (wing chord)")+
-#  scale_x_discrete(labels= c("Uninfected","Infected"))
-
-#
-nestling.wing.bc.sub.data <- nestling.BC %>%
-  filter(!nestling.number == "NA", !nestling.number =="0")
-  
-  
-nestling.wing.BC.lm <- glmmTMB(wing.cond_resid ~ nest.mite.status + (1|area)+ (1|nestling.number),nestling.BC)
-
-#much lower AIC
-wing.BC.lm2 <- glmmTMB(wing.cond_resid ~ nest.mite.status +(1|nestling.number),nestling.BC)
+AIC(mod1.year, mod1.area, mod1.both,mod1.noRE, mod1.null)
 
 
-#REDO
-nest.data.nestl.BC.data<- read.csv("ALL.NEST.csv") %>%
-  filter(!M.species=="MOCH", !M.species=="BCCH")
-table(nest.data$area, useNA = "ifany")
+##mod1.no.RE is the. best fit
+summary(mod1.noRE)
 
-nest.BClm.data <- nest.data
-wing.nestl.BC.lm1 <- glmmTMB(avg.nest.wing.BC~nest.status+Nestling_Number,nest.data)
-wing.nestl.BC.lm2 <- glmmTMB(avg.nest.wing.BC~nest.status+Nestling_Number+area,nest.data)
+          ##INTERPRETATION
 
+# log(Nestling number) = 1.69562 -0.19459(infected)
 
-AIC(wing.nestl.BC.lm1,wing.nestl.BC.lm2)
-summary(wing.nestl.BC.lm1)
+logNNinf <- 1.69562 - 0.14870*(1)
+NNinf <- exp(logNNinf)
 
+logNNuninf <- 1.69562 -0.14870*(0)
+NNuninf <- exp(logNNuninf)
 
-##NO SIGNIFICANCE
+#get prob difference between M and F MOCH
+NNinf/NNuninf # = 0.8618276
 
-#####Body condition with TARSUS #####
+(1 - 0.8618276)*100
 
-
-                          ####### data setup #####
-#remove rows that do not have nestling weight data and save to new DF
-nestling.cond.data = m.nest.data
+# There are 13.81724% less nestlings in infected nests than uninfected nests
 
 
+meandata1 <- mod.1.data %>%
+  filter(nest.status == "1")
+mean(meandata1$Nestling_Number)
+#average Nestling number for infected nests = 4.5
 
-##sara stuff translated from adult body condition to nestling#
-##im not sure if this is a valid way to do this because its translated from wing to tarsus for residual##
+meandata0 <- mod.1.data %>%
+  filter(nest.status == "0")
+mean(meandata0$Nestling_Number)
+#average nestling number for uninfected nests = 5.47
 
-nestling.cond.data.tarsus <- nestling.cond.data %>%
-  mutate(
-    tarsus   = suppressWarnings(as.numeric(Tarsus.Length)),
-    mass_g = suppressWarnings(as.numeric(Bird.Weight))
-  )
+            ##ASSUMPTIONS
 
-# Keep only rows with both values
-dat_cond_tarsus <- nestling.cond.data.tarsus %>%
-  filter(!is.na(mass_g), !is.na(tarsus), mass_g > 0, tarsus > 0)
+simulationOutput1 <- DHARMa::simulateResiduals(mod1.noRE)
+plot(simulationOutput1)
+#all looks good!
 
-if (nrow(dat_cond_tarsus) < 10) {
-  warning("Few rows with both mass and tarsus available (n = ", nrow(dat_cond_tarsus), ").")
-}
+#test dispersion assumption for compois
+#test model with and without dispersion formula (taking into account different dispersion across x )
 
-# Fit regression of body mass on tarsus
-cond_lm_tarsus <- lm(log(mass_g) ~ log(tarsus), data = dat_cond_tarsus)
+dispcheck <- glmmTMB(Nestling_Number ~  nest.status, data = mod.1.data, family = compois, dispformula = ~ nest.status)
+AIC(mod1.noRE, dispcheck)
 
-# Add residuals back into the main dataframe
-nestling.cond.data.tarsus$cond_resid <- NA_real_
-nestling.cond.data.tarsus$cond_resid[as.integer(rownames(dat_cond_tarsus))] <- resid(cond_lm_tarsus)
+#the AICs are not very different so I will not add the formuala
 
-
-
-
+           ##PLOT
+library(ggsignif)
 
 
-
-
-                          ##### actual analysis ####
-
-#graph
-nestling.BC %>%
-  ggplot(aes(x = nest.status, y = avg.nestling.BC.tarsus))+
+mod.1.data %>%
+  ggplot(aes(x = as.factor(nest.status), y = Nestling_Number, fill = as.factor(nest.status)))+
   geom_boxplot()+
-  labs(x = "Nest Infection Status", y = "Average Nestling Body Condition", title= "Nest infection status vs Nestling 
-Body Condition")+
-  scale_x_discrete(labels= c("Uninfected","Infected"))
-
-#
-
-tarsus.BC.lm <- glmmTMB(avg.nestling.BC.tarsus~nest.status + (1|area) + (1|Nest.year)+(1|Nestling_Number),nestling.BC)
-
-summary(tarsus.BC.lm)
-
-#NO SIGNIFICANCE
-
-
-#####NESLTING BODY CONDITION REDO#########
-
-nestling.data <- read.csv("ALL.NESTLING.csv")
-
-#filter data and such
-
-nestl.BC.analysis.data <- nestling.data %>%
-  filter(Species == "MOCH") %>%
-  mutate(across(c(Tarsus.Length, Bird.Weight), as.numeric)) 
-
-#calculate scaling component
-library(smatr)
-
-sma_fit_N <- sma(log(Bird.Weight) ~ log(Tarsus.Length), data = nestl.BC.analysis.data)
-#run coef(sma_fit_N) and make slope the bSMA
-b_SMA_N <- 1.1300709  
-
-#calculate reference length (mean of population tarsus)
-L0_N <- mean(nestl.BC.analysis.data$Tarsus.Length, na.rm = TRUE)
-
-#calculate SMI
-
-nestl.BC.analysis.data$SMI_tarsus <-
-  nestl.BC.analysis.data$Bird.Weight *
-  (L0 / nestl.BC.analysis.data$Tarsus.Length)^b_SMA
-
-
-nestl.BC.lm.1 <- glmmTMB(SMI_tarsus ~ nest.mite.status ,data =nestl.BC.analysis.data )
-
-summary(nestl.BC.lm.1)
+  geom_jitter(width = 0.1, alpha = 0.5)+
+  #labels
+  labs( x = "Nest Infection Status", y = "Nestling Number", 
+        title = "Parents Infection Status vs Nestling Number")+
+  #change size of axis labels
+  theme_grey(base_size = 10)+
+  #change colors for boxes 
+  scale_fill_manual(values = c("lightblue","salmon"))+
+  #remove legend for fill
+  guides(fill = "none")+
+  #change x axis labels
+  scale_x_discrete(labels = c("Uninfected", "Infected"))+
+  #change y axis values
+  scale_y_continuous(breaks=c(0,2,4,6,8,10), limits = c(0,10))+
+  theme_classic()
+  
 
 
 
 
 
+                            ###### Clutch Size #######
 
 
-###### NESTLING NUMBER ######
-#see biostsats project
-
-
-###### EGG NUMBER #######
-
-nest.data <- read.csv("ALL.NEST.csv")
 
 #add column for nest status
-nest.data$nest.status <- as.factor(ifelse(nest.data$Num.mite.per.nest > 0, 1, 0))
+#nest.data$nest.status <- as.factor(ifelse(nest.data$Num.mite.per.nest > 0, 1, 0))
 
 # check all variables for NAs
 table(nest.data$Egg_Number, useNA = "ifany")
@@ -229,7 +171,7 @@ table(nest.data$julian.CI.date, useNA = "ifany")
 
 #remove NAs etc
 
-#for removal of julian date nas
+#for removal of julian date NAs
 ##egg.num.data <- nest.data %>%
 #  filter(!Egg_Number == "0", !Egg_Number == "", !Egg_Number == "NA",!area == "NA",M.species == "MOCH",!julian.CI.date == "NA")
 
@@ -285,131 +227,476 @@ ENinf/ENuninf # = 0.9092184
 
 #nests where one or both parents are infected with mites lay ~9.08 % less eggs than uninfected nests
 
+            #graph#
+
+egg.num.data %>%
+  ggplot(aes(x = as.factor(nest.status), y = Egg_Number, fill = as.factor(nest.status))) +
+  labs(x = "Parent(s) infection status", y = "Clutch Size", title = "Parents Infection Status vs Clutch Size")+
+  geom_boxplot()+
+  geom_point(position = "jitter")+
+  #change colors for boxes 
+  scale_fill_manual(values = c("lightblue","salmon"))+
+  #remove legend for fill
+  guides(fill = "none")+
+  #change x axis labels
+  scale_x_discrete(labels = c("Uninfected", "Infected"))+
+  #change y axis values
+  scale_y_continuous(breaks=c(1,3,5,7,9,11), limits = c(1,11))+
+  theme_classic()
+
+
+
 
 #### do egg analysis again for female infected 
-
-egg.num.lm.F <- glmmTMB(Egg_Number ~  F.mite.status + (1|M.banding.year) + (1|area), data = egg.num.data, family = compois)
+egg.num.f.data <- egg.num.data %>%
+  filter(M.mite.status == "0")
+egg.num.lm.F <- glmmTMB(Egg_Number ~  F.mite.status , data = egg.num.f.data, family = compois)
 
 summary(egg.num.lm.F)
 
 #for male infected
-egg.num.lm.M <- glmmTMB(Egg_Number ~  M.mite.status + (1|M.banding.year) + (1|area), data = egg.num.data, family = compois)
+egg.num.m.data <- egg.num.data %>%
+  filter(F.mite.status == "0") 
+
+egg.num.lm.M <- glmmTMB(Egg_Number ~  M.mite.status ,data = egg.num.m.data, family = compois)
 
 summary(egg.num.lm.M)
-
 ##no effect when female is infected but effect when male is infected?
 
-##### ADULT BODY CONDITION #####
-indiv.data <- read.csv("ALL.INDIV.csv")
+
+                      ##### Nestling SMI #####
 
 
-
-
-indiv.data <- indiv.data %>%
-  mutate(
-    wing   = suppressWarnings(as.numeric(Wing.Chord)),
-    mass_g = suppressWarnings(as.numeric(Bird.Weight))
-  )
-
-# Keep only rows with both values
-dat_cond_adult_wing <- indiv.data %>%
-  filter(!is.na(mass_g), !is.na(wing), mass_g > 0, wing > 0)
-
-if (nrow(dat_cond_adult_wing) < 10) {
-  warning("Few rows with both mass and wing available (n = ", nrow(dat_cond_adult_wing), ").")
-}
-
-# Fit regression of body mass on wing
-cond_adult_lm_wing <- lm(log(mass_g) ~ log(wing), data = dat_cond_adult_wing)
-
-# Add residuals back into the main dataframe
-indiv.data$body.cond.wing <- NA_real_
-indiv.data$body.cond.wing[as.integer(rownames(dat_cond_adult_wing))] <- resid(cond_adult_lm_wing)
-
-write.csv(indiv.data ,"individual.data.csv", row.names = FALSE)
-
-
-#####ADULT BODY CONDITION REDO##########
+###calculating SMI 
+nestling.data <- read.csv("ALL.NESTLING.csv")
+#write.csv(nestl.BC.analysis.data, "ALL.MOCH.NESTLING.csv", row.names = FALSE)
 
 #filter data and such
 
-ad.BC.analysis.data <- indiv.data %>%
-  filter(Species == "MOCH", Sex == "F" |Sex == "M") %>%
-  mutate(across(c(Tarsus.Length, Bird.Weight), as.numeric)) %>%
-  mutate(across(c(Nestling_Number), as.factor))
+nestl.BC.data <- nestling.data %>%
+  filter(Species == "MOCH", Banding.Year >= 2023) %>%
+  mutate(across(c(Tarsus.Length, Bird.Weight), as.numeric)) 
+
+#check for outliers
+boxplot(nestl.BC.data$Tarsus.Length)
+    # crazy large outlier, small ones are maybe fine?
+boxplot(nestl.BC.data$Bird.Weight)
+    #some very small ones, ask sara?
+
+#remove outliers
+nestl.BC.data <- nestl.BC.data %>%
+  filter(Tarsus.Length <= 21, )
 
 #calculate scaling component
 library(smatr)
 
-sma_fit <- sma(log(Bird.Weight) ~ log(Tarsus.Length), data = ad.BC.analysis.data)
-#run coef(sma_fit) and make slope the bSMA
-b_SMA <- -0.744241  
+sma_fit_N <- sma(log(Bird.Weight) ~ log(Tarsus.Length), data = nestl.BC.analysis.data)
+#run coef(sma_fit_N) and make slope the bSMA
+b_SMA_N <- 1.354744  
 
 #calculate reference length (mean of population tarsus)
-L0 <- mean(ad.BC.analysis.data$Tarsus.Length, na.rm = TRUE)
+L0_N <- mean(nestl.BC.data$Tarsus.Length, na.rm = TRUE)
 
 #calculate SMI
 
-ad.BC.analysis.data$SMI_tarsus <-
+nestl.BC.data$SMI_tarsus <-
+  nestl.BC.data$Bird.Weight *
+  (L0 / nestl.BC.data$Tarsus.Length)^b_SMA
+
+#write.csv(nestl.BC.data, "ALL.MOCH.NESTLING.csv", row.names = FALSE)
+
+#import nest data sheet
+nest.data <- read.csv("ALL.NEST.csv")
+
+
+  #ADD AVG NESTLING BC TO NEST SHEET
+
+# Step 1–2: compute yearly averages
+nestling.SMI.avg <- nestl.BC.data %>%
+  group_by(nest.year) %>%
+  summarise(mean_SMI_tarsus = mean(SMI_tarsus, na.rm = TRUE))
+
+# Step 3: join to the analysis dataset
+nest.data <- nest.data %>%
+  left_join(nestling.SMI.avg, by = "nest.year")
+
+  ##FILTER DATA FOR ANALYSIS
+
+#analysis want to include
+#area, julian date, bander ID
+nestl.BC.analysis.data <- nest.data %>%
+  filter(M.species == "MOCH", #make just MOCH
+         !area == "NA", !nestl.bander.ID == "NA", !julian.CI.date == "NA", !Nestling_Number == 0) %>% #rm NAs for variables i will be using
+  mutate(across(c(nest.status), as.factor))
+
+#test normality of response var
+hist(nestl.BC.analysis.data$mean_SMI_tarsus)
+shapiro.test(nestl.BC.analysis.data$mean_SMI_tarsus)
+  #Normal!
+
+
+nestl.BC.lm.1 <- glmmTMB(mean_SMI_tarsus ~ nest.status  ,data =nestl.BC.analysis.data )
+
+nestl.BC.lm.2 <- glmmTMB(mean_SMI_tarsus ~ nest.status + (1|area) ,data =nestl.BC.analysis.data )
+
+#this one
+nestl.BC.lm.3 <- glmmTMB(mean_SMI_tarsus ~ nest.status + (1|area) + (1|nestl.bander.ID) ,data =nestl.BC.analysis.data )
+summary(nestl.BC.lm.3)
+
+nestl.BC.lm.4 <- glmmTMB(mean_SMI_tarsus ~ nest.status + julian.CI.date + (1|area) + (1|nestl.bander.ID) ,data = nestl.BC.analysis.data )
+summary(nestl.BC.lm.4)
+
+nestl.BC.lm.5 <- glmmTMB(mean_SMI_tarsus ~ nest.status + julian.CI.date + (1|area) + (1|nestl.bander.ID) + Nestling_Number ,data =nestl.BC.analysis.data )
+
+AIC(nestl.BC.lm.3,nestl.BC.lm.4,nestl.BC.lm.5)
+#all the AICs are about the same but the only one that fits assumptions when plotting simulated residuals is lm.5 so I will be using that one
+
+summary(nestl.BC.lm.5)
+
+#all looks good!
+sim2 <- simulateResiduals(nestl.BC.lm.5)
+plot(sim2)
+
+check_collinearity(nestl.BC.lm.5)
+#looks good
+
+testDispersion(sim2)
+testZeroInflation(sim2)
+testUniformity(sim2)
+testOutliers(sim2)
+#all look good
+
+#FINAL MODEL
+summary(nestl.BC.lm.5)
+
+#GRAPH 
+nestl.BC.analysis.data %>%
+  ggplot(aes(x = nest.status, y = mean_SMI_tarsus, fill = nest.status)) +
+  geom_boxplot()+
+  geom_jitter(width = .2, alpha = .5)+
+  labs(x = "Parent Infection Status", y = "Average Nestling SMI", title = "Parent infection and Average nestling body condition")+
+  #change colors for boxes 
+  scale_fill_manual(values = c("lightblue","salmon"))+
+  #remove legend for fill
+  guides(fill = "none")+
+  #change x axis labels
+  scale_x_discrete(labels = c("Uninfected", "Infected"))+
+  #change y axis values
+  scale_y_continuous(breaks=c(8,9,10,11,12,13,14,15), limits = c(8,15))+
+  #make the background less busy
+  theme_classic()
+
+
+
+### analysis on if there is a general trend between nestling number and nestling body condition
+
+NN.BC.analysis.data <- nest.data %>%
+  filter(M.species == "MOCH", M.mite.status == "0" & F.mite.status == "0") %>%
+  mutate(across(c(Nestling_Number), as.numeric))
+NN.BC.lm <- glmmTMB(avg.nest.SMI.tarsus ~ Nestling_Number +(1|nestl.bander.ID), data = NN.BC.analysis.data)
+
+NN.BC.analysis.data %>%
+  ggplot(aes(x = Nestling_Number, y = avg.nest.SMI.tarsus))+
+  geom_point()+
+  geom_smooth(method="lm")
+summary(NN.BC.lm)
+
+
+              #### OTHER HONORS THESIS STUFF ####
+
+
+                ###### Adult SMI ######
+
+#filter data and such
+indiv.data <- read.csv("ALL.INDIV.csv")
+
+#CHECK FOR tarsus/weight OUTLIERS
+boxplot(as.numeric(indiv.data$Bird.Weight))
+boxplot(as.numeric(indiv.data$Tarsus.Length))
+
+#standardize tarsus bc of differences in measurement methods between years (code from chat GPT)
+#this uses 2025 as a reference year to convert the rest of the years to match
+
+#plot of tarsus before scaling
+indiv.data %>%
+  ggplot(aes(x = as.factor(Banding.Year), y = as.numeric(Tarsus.Length)))+
+  geom_boxplot()
+#yikes
+
+#make tarsus numeric
+indiv.data$Tarsus.Length <- as.numeric(indiv.data$Tarsus.Length)
+
+ref_year <- 2025
+
+ref_mean <- mean(indiv.data$Tarsus.Length[indiv.data$Banding.Year == ref_year], na.rm = TRUE)
+ref_sd   <- sd(indiv.data$Tarsus.Length[indiv.data$Banding.Year == ref_year], na.rm = TRUE)
+
+indiv.data$Tarsus.scaled <- ave(
+  indiv.data$Tarsus.Length,
+  indiv.data$Banding.Year,
+  FUN = function(x) {
+    z <- (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+    z * ref_sd + ref_mean
+  }
+)
+
+#plot to see
+indiv.data %>%
+  ggplot(aes(x = as.factor(Banding.Year), y = as.numeric(Tarsus.scaled)))+
+  geom_boxplot()
+#looks a lot better!
+
+
+#make actual analysis data
+ad.BC.analysis.data <- indiv.data %>%
+  filter(Species == "MOCH", Sex == "F" |Sex == "M", !Bander.ID == "SAT", !Bander.ID == "EC",!Bander.ID == "BGH", !Bander.ID == "NA",!Bander.ID == "ERC", #remove banders with <2 occurances
+         Banding.Year >= 2023,#remove years before 2023 bc of tarsus measurement differences
+        ) %>%    
+  mutate(across(c(Tarsus.Length, Bird.Weight, Nestling_Number), as.numeric))%>%
+  mutate(across(c(Mite_status, Num.mite.per.nest, Bander.ID, Banding.Year), as.factor))
+
+
+
+#calculate scaling component
+library(smatr)
+
+sma_fit <- sma(log(Bird.Weight) ~ log(Tarsus.scaled), data = ad.BC.analysis.data)
+#run coef(sma_fit) and make slope the bSMA
+b_SMA <- 1.517474    
+
+#calculate reference length (mean of population tarsus)
+L0 <- mean(ad.BC.analysis.data$Tarsus.scaled, na.rm = TRUE)
+
+#calculate SMI
+
+ad.BC.analysis.data$SMI_scaled.tarsus <-
   ad.BC.analysis.data$Bird.Weight *
-  (L0 / ad.BC.analysis.data$Tarsus.Length)^b_SMA
+  (L0 / ad.BC.analysis.data$Tarsus.scaled)^b_SMA
 
-#just effect
-adult.BC.lm <- glmmTMB(SMI_tarsus ~ Mite_status, ad.BC.analysis.data)
+## Test normality
+hist(ad.BC.analysis.data$SMI_scaled.tarsus)
+shapiro.test(ad.BC.analysis.data$SMI_scaled.tarsus)
+#not normal, will log transform in analysis
 
-#julian date
-adult.BC.lm2 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day, ad.BC.analysis.data)
-
-#julian date and bander ID
-adult.BC.lm3 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|Bander.ID), ad.BC.analysis.data)
-
-#julian date, bander ID, and area
-adult.BC.lm4 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID), ad.BC.analysis.data)
-
-#julian date, bander ID, area, and year
-adult.BC.lm5 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year), ad.BC.analysis.data)
-
-#julian date, bander ID, area, and year
-adult.BC.lm5 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year) + (1|Sex), ad.BC.analysis.data)
-
-###THIS ONE
-adult.BC.lm6 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year) + Sex , ad.BC.analysis.data)
+            ## analysis ##
+#variables tested for AI
+##fixed effects
+  #julian band day
+##random effects
+  #area
+  #sex
+  #bander ID
+  #banding year
 
 
-adult.BC.lm7 <- glmmTMB(SMI_tarsus ~ Mite_status + julian.band.day + (1|area) +(1|Bander.ID) + (1|Banding.Year) + Sex + (1|Nestling_Number), ad.BC.analysis.data)
 
+#
+adult.BC.lm1 <- glmmTMB(log(SMI_scaled.tarsus) ~ Mite_status + Sex+(1|area) + (1|Bander.ID), ad.BC.analysis.data)
 
-summary(adult.BC.lm7)
-AIC(adult.BC.lm7,adult.BC.lm6)
-
-plot(ad.BC.analysis.data$SMI_tarsus)
-
-#sex has a huge effect on body condtion
-summary(glmmTMB(SMI_tarsus ~ Sex, ad.BC.analysis.data))
-
-
-                    ## Analysis ##
-#analyze only MOCH
-adult.BC.data <- indiv.data %>%
-  filter(Species == "MOCH", !Sex == "U", !Sex == "")
-
-table(adult.BC.data$Sex)
-
-#possible predictors
-    # area
-    # sex
-    # month/year
-##I CHECKED MODELS WITH ALL OF THESE AND NONE OF THEM CHANGED THE AIC 
-adult.BC.lm <- glmmTMB(body.cond.wing ~ Mite_status, adult.BC.data)
-adult.BC.lm2 <- glmmTMB(body.cond.wing ~ Mite_status +julian.band.day, adult.BC.data)
-
-AIC(adult.BC.lm,adult.BC.lm2)
+#this is best fit
+adult.BC.lm2 <- glmmTMB(log(SMI_scaled.tarsus) ~ Mite_status + (1|area) + (1|Bander.ID), ad.BC.analysis.data)
 summary(adult.BC.lm2)
 
-#### INFECTIONS PER AREA ####
+adult.BC.lm3 <- glmmTMB(log(SMI_scaled.tarsus) ~ Mite_status + julian.band.day + (1|area), ad.BC.analysis.data)
+
+#NULL
+adult.BC.NULL <- glmmTMB(log(SMI_scaled.tarsus) ~ 1  , ad.BC.analysis.data)
+
+AIC(adult.BC.lm1,adult.BC.lm2,adult.BC.lm3,adult.BC.NULL)
+summary(adult.BC.lm2)
+
+sim1 <- simulateResiduals(adult.BC.lm2)
+plot(sim1)
+
+### PLOT ###
+ad.BC.analysis.data %>%
+  ggplot(aes(x = Mite_status , y = SMI_scaled.tarsus, fill = Mite_status)) + 
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(width = .2, alpha = .5)+
+  labs(x = "Infection Status", y = "Scaled Mass (g)", title = "Infection status vs Body condition")+
+  #change colors for boxes 
+  scale_fill_manual(values = c("lightblue","salmon"))+
+  #remove legend for fill
+  guides(fill = "none")+
+  #change x axis labels
+  scale_x_discrete(labels = c("Uninfected", "Infected"))+
+  #change y axis values
+  scale_y_continuous(breaks=c(6,8,10,12,14,16,18,20,22), limits = c(6,22))+
+  theme_classic()
+#there are two high outliers in infection side
+
+boxplot(as.numeric(ad.BC.analysis.data$Tarsus.scaled))
+boxplot(as.numeric(indiv.data$Bird.Weight))
 
 
-jhg
+
+              ###### Sex ######
+
+          ## DATA SET CREATION
+
+#filter data to make sure there are only M and F for sex
+mod3.data <- indiv.data %>%
+  filter(!is.na(Sex), !Sex == "", !Sex == "u", !Sex == "U", !Sex == "M ", 
+         #remove any sex that is not M or F (thats too bad :/ )
+         !area == "", !Banding.Year == "NA", !Mite_status == "NA", 
+         #remove data with no area attached
+         Species == "MOCH") 
+#filter for MOCH
+
+#reduce data so its just one individual per nest
+set.seed(4399)
+
+#filter so there is only one individual per nest
+mod3.redu <- mod3.data %>%
+  group_by(Nest.year) %>%
+  slice_sample(n = 1) %>%
+  ungroup()
+
+str(mod3.redu)
+
+
+          ## MODELS
+mod3.area <- glmmTMB(Mite_status ~ Sex + (1|area), data = mod3.redu, 
+                     family = binomial)
+
+mod3.no.RE <- glmmTMB(Mite_status ~ Sex, data = mod3.redu, family = binomial)
+
+mod3.year.area <- glmmTMB(Mite_status ~ Sex + (1|area)+ (1|Banding.Year), 
+                          data = mod3.redu, family = binomial)
+
+mod3.year <- glmmTMB(Mite_status ~ Sex + (1|Banding.Year), data = mod3.redu, 
+                     family = binomial)
+
+
+AIC(mod3.area, #area as RE
+    mod3.no.RE, # no area as RE
+    mod3.year.area,# area and year as RE
+    mod3.year) #just year RE
+
+#just area as RE is best
+
+summary(mod3.area)
+
+
+            ## INTERPRETAION
+
+invlogit <- function(x) { exp(x) / (1 + exp(x)) }
+#logit = -2.5140  + (M)1.0384
+
+#convert estimates into actual prob
+logprobMMOCH <- -2.5140+ (1)*1.0384
+probMMOCH <- invlogit(logprobMMOCH)
+
+logprobFMOCH <- -2.5140 + (0)*1.0384
+probFMOCH <- invlogit(logprobFMOCH)
+
+#get prob difference between M and F MOCH
+probMMOCH/probFMOCH
+# = 2.485131
+
+#Male MOCH are infected 2.49 times as often as females
+
+            ## ASSUMPTIONS
+
+# DEVIANCE 
+mod3.NULL <-glmmTMB(Mite_status ~ 1+ (1|area), data = mod3.redu, family = binomial)
+
+deviance(mod3.area) #135.0731
+deviance(mod3.NULL) #143.7447
+#null deviance > model deviance so we are good!
+
+check_overdispersion(mod3.area) # no overdispersion
+
+check_model(mod3.area)
+#binned residuals looks weird again, but piet says it ok
+
+
+          ## PLOT
+#make mite status a factor for plotting
+mod3.redu$Mite_status <- factor(mod3.redu$Mite_status)
+
+#opposite plot (x sex, y mite status)
+ggplot(data = mod3.redu) +
+  geom_mosaic(aes(x = product(Mite_status, Sex), fill = Mite_status, weight = 1)) +
+  labs(
+    x = "Sex",
+    y = "Proportion Infected",
+    title = "MOCH Infection status by Sex",
+    fill = "Infection Status"   # Legend title
+  ) +
+  #change size of axis/title labels
+  theme_grey(base_size = 11)+
+  #change colors y axis and labels for legend
+  scale_fill_manual(
+    values = c("1" = "salmon", "0" = "lightblue"),
+    labels = c("0" = "Uninfected", "1" = "Infected")  # Legend labels
+  ) +
+  # add sample sizes in the boxes
+  geom_mosaic_text(aes(x = product(Mite_status, Sex), label = after_stat(.wt)),
+                   as.label = TRUE, size = 3.5) +
+  #change x axis group labels
+  scale_x_productlist(labels = c("0" = "Female", "1" = "Male"))+ 
+  #force y axis labels
+  scale_y_continuous(limits = c(0, 1),  
+                     breaks = seq(0, 1, by = 0.5),
+                     labels = scales::number_format(accuracy = 0.01))
+
+
+########## infection/ area (INDIV)###########
+area.indiv.data <- indiv.data%>%
+  mutate(across(c(Mite_status, area), as.factor)) %>%
+  filter(!julian.band.day == "NA", !area == "NA", !area == "")
+
+#change area reference level to MRS
+area.indiv.data$area <- relevel(area.indiv.data$area, ref = "BLD")
+
+#### infected nests
+# i tested analysis with julian date as covariate and there was no difference in models
+nest.area.lm1 <- glmmTMB(Mite_status ~ area, family = binomial,data = area.indiv.data)
+
+nest.area.lm2 <- glmmTMB(Mite_status ~ area + julian.band.day, family = binomial,data = area.indiv.data)
+
+nest.area.lm3 <- glmmTMB(Mite_status ~ area + Banding.Year, family = binomial,data = area.indiv.data)
+
+nest.area.null <- glmmTMB(Mite_status ~ 1, family = binomial,data = area.indiv.data)
+
+AIC(nest.area.lm1,nest.area.lm2,nest.area.lm3,nest.area.null)
+#all the same so choosing lm1
+summary(nest.area.lm1)
+
+table(area.indiv.data$area,area.indiv.data$Mite_status)
+
+
+
+#plot for area and individual infection (INDIV)
+area.plot.data <- indiv.data %>%
+  filter(!area == "CU", !area == "NA", !area=="")%>%
+  mutate(across(Mite_status, as.factor))
+
+#change order to plot is cleaner
+area.indiv.data$area <- factor(
+  area.indiv.data$area,
+  levels = c("BLD", "FLG", "SGR", "NED", "MRS")
+)
+
+ggplot(data = area.indiv.data) +
+  geom_mosaic(aes(x = product(Mite_status, area), fill = Mite_status, weight = 1)) +
+  labs(x = "Area", y = " ", title = "Infection proportion per area", fill = "Infection Status" )+
+  scale_fill_manual(
+    values = c("1" = "salmon", "0" = "lightblue"),
+    labels = c("0" = "Uninfected", "1" = "Infected")  # Legend labels
+  )+ theme(
+    panel.grid = element_blank(),# remove background pattern
+    axis.ticks.y = element_blank()) + scale_y_continuous(limits = c(0, 1),
+breaks = seq(0, 1, by = .5),
+labels = scales::number_format(accuracy = 0.01))
+
+
+
+                        #### INFECTIONS PER AREA ####
+
+
+
 #remove NA area cases
 mite.data.handcap = mite.data[(!is.na(mite.data$area)), ]
 
@@ -684,49 +971,38 @@ points(only.mite.SGR$long,
 
 
 
-########## analysis of infection and area ###########
+########## analysis of infection and area (NESTS)###########
 area.nest.data <- nest.data%>%
   mutate(across(c(nest.status, area), as.factor)) %>%
-  filter(!M.species == "BCCH", !julian.CI.date == "NA")
+  filter(!M.species == "BCCH", !julian.CI.date == "NA", !area == "NA")
+
+table(area.nest.data$area, useNA = "ifany")
+
 
 #### infected nests
   # i tested analysis with julian date as covariate and there was no difference in models
-nest.area.lm1 <- glmmTMB(nest.status ~ area, data = area.nest.data)
+nest.area.lm1 <- glmmTMB(nest.status ~ area, family = binomial,data = area.nest.data)
 
-nest.area.lm2 <- glmmTMB(nest.status ~ area + julian.CI.date, data = area.nest.data)
+nest.area.lm2 <- glmmTMB(nest.status ~ area + julian.CI.date, family = binomial,data = area.nest.data)
 
-nest.area.lm3 <- glmmTMB(nest.status ~ area + M.banding.year, data = area.nest.data)
+nest.area.lm3 <- glmmTMB(nest.status ~ area + M.banding.year, family = binomial,data = area.nest.data)
 
-AIC(nest.area.lm1,nest.area.lm2,nest.area.lm3) #all are the same
+nest.are.null <- glmmTMB(nest.status ~ 1, family = binomial,data = area.nest.data)
 
-#do simple t-test
-t.test
+AIC(nest.area.lm1,nest.area.lm2,nest.area.lm3,nest.are.null) #all are the same
+#they are all pretty much the same, so im going to use the first one
+
+summary(nest.area.lm1)
 
 
-#plot for area and individual infection
-area.plot.data <- indiv.data %>%
-  filter(!area == "CU", !area == "NA", !area=="")%>%
-  mutate(across(Mite_status, as.factor))
 
-#change order to plot is cleaner
-area.plot.data$area <- factor(
-  area.plot.data$area,
-  levels = c("BLD", "FLG", "SGR", "NED", "MRS")
-)
-
-ggplot(data = area.plot.data) +
-  geom_mosaic(aes(x = product(Mite_status, area), fill = Mite_status, weight = 1)) +
-  labs(x = "Area", y = " ", title = "Infection proportion per area", fill = "Infection Status" )+
-  scale_fill_manual(
-    values = c("1" = "lightblue", "0" = "salmon"),
-    labels = c("0" = "Uninfected", "1" = "Infected")  # Legend labels
-  )+ theme(
-    panel.grid = element_blank(),# remove background pattern
-    axis.text.y = element_blank(), #remove y axis labels
-    axis.ticks.y = element_blank()) #remove y axis ticks
  
 
 library(ggmosaic)
+
+
+
+
                           #### MAPS ####
 
 
@@ -1120,3 +1396,43 @@ area.chi.square
 
 chisq.posthoc.test(area.table,
                    method = "bonferroni")
+
+
+### mite measurement ranges graph #### 
+#(code from chat gpt...)
+
+library(ggplot2)
+
+mites <- data.frame(
+  Species = c("K. intermedius", "K. jamaicensis", "K. mutans", "Current Sample"),
+  width_mid  = c(379, 295, 470, 275),
+  length_mid = c(434.5, 325, 370, 305),
+  
+  width_min  = c(360, 260, 445, 275),
+  width_max  = c(398, 330, 495, 275),
+  
+  length_min = c(414, 291, 340, 305),
+  length_max = c(455, 359, 400, 305)
+)
+
+ggplot(mites, aes(x = width_mid, y = length_mid, color = Species)) +
+  
+  # vertical ranges (length)
+  geom_errorbar(aes(ymin = length_min, ymax = length_max),
+                width = 0, size = 0.6) +
+  
+  # horizontal ranges (width)
+  geom_errorbarh(aes(xmin = width_min, xmax = width_max),
+                 height = 0, size = 0.6) +
+  
+  # central point
+  geom_point(size = 3) +
+  
+  labs(x = "width (um)", y = "length (um)", title = "Dimensions of Knemidocoptid mites and current sample") +
+  theme_minimal()
+
+
+
+
+
+
